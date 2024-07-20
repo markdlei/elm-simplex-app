@@ -6,6 +6,10 @@ import Html.Attributes exposing (value)
 import Html.Events exposing (onClick, onInput)
 
 import Array exposing (Array, initialize, get, set, push, slice, toList, map, indexedMap)
+import Array exposing (toIndexedList)
+import String exposing (toInt, fromInt)
+import Html exposing (strong)
+import String exposing (dropRight)
 
 
 
@@ -86,7 +90,7 @@ update msg model =
 
     CellInput rowIdx colIdx input ->
       { model
-      | dataMatrix = setMatrixCell model.dataMatrix rowIdx colIdx input
+      | dataMatrix = setMatrixCell model.dataMatrix rowIdx colIdx (forceInt input)
       }
 
     Finish ->
@@ -107,6 +111,17 @@ getMatrixRow matrix rowIdx =
 pop : Array a -> Array a
 pop arr =
   slice 0 -1 arr
+
+forceInt : String -> String
+forceInt str =
+  if str == "-" then
+    str
+  else
+    case toInt str of
+      Just num ->
+        fromInt num
+      Nothing ->
+        dropRight 1 str
 
 
 
