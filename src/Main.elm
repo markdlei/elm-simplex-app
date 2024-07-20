@@ -24,14 +24,28 @@ main =
 type alias Model =
   { numRows: Int
   , numCols: Int
-  , dataMatrix: Array (Array String)
+  , data: Data
   , outputText: String
+  }
+
+type alias Data =
+  { objective: String
+  , matrix: Array (Array String)
+  , constraint: Array String
   }
 
 
 init : Model
 init =
-  Model 3 3 (initialize 3 (always (initialize 3 (always "")))) ""
+  Model
+    3
+    3
+    (Data 
+      ""
+      (initialize 3 (always (initialize 3 (always ""))))
+      (initialize 3 (always ""))
+    )
+    ""
 
 
 
@@ -44,7 +58,9 @@ type Msg
   | IncrementCol
   | DecrementCol
   | Reset
-  | CellInput Int Int String
+  | ObjectiveInput String
+  | MatrixInput Int Int String
+  | ConstraintInput Int String
   | Finish
 
 
@@ -52,45 +68,91 @@ update : Msg -> Model -> Model
 update msg model =
   case msg of
     IncrementRow ->
-      { model
-      | numRows = model.numRows + 1
-      , dataMatrix = push (initialize model.numCols (always "")) model.dataMatrix
-      }
+      let
+        oldData = model.data
+        newData =
+          { oldData
+          | matrix = push (initialize model.numCols (always "")) model.data.matrix
+          , constraint = push "" model.data.constraint
+          }
+      in
+        { model
+        | numRows = model.numRows + 1
+        , data = newData
+        }
 
     DecrementRow ->
       if model.numRows /= 1 then
-        { model
-        | numRows = model.numRows - 1
-        , dataMatrix = pop model.dataMatrix
-        }
+        let
+          oldData = model.data
+          newData = 
+            { oldData
+            | matrix = pop model.data.matrix
+            , constraint = pop model.data.constraint
+            }
+        in
+          { model
+          | numRows = model.numRows - 1
+          , data = newData
+          }
       else
         model
 
     IncrementCol ->
-      { model
-      | numCols = model.numCols + 1
-      , dataMatrix = Array.map (push "") model.dataMatrix
-      }
+      let
+        oldData = model.data
+        newData = { oldData | matrix = Array.map (push "") model.data.matrix }
+      in
+        { model
+        | numCols = model.numCols + 1
+        , data = newData
+        }
 
     DecrementCol ->
       if model.numCols /= 1 then
-        { model
-        | numCols = model.numCols - 1
-        , dataMatrix = Array.map pop model.dataMatrix
-        }
+        let
+          oldData = model.data
+          newData = { oldData | matrix = Array.map pop model.data.matrix }
+        in
+          { model
+          | numCols = model.numCols - 1
+          , data = newData
+          }
       else
         model
 
     Reset ->
       init
 
-    CellInput rowIdx colIdx input ->
-      { model
-      | dataMatrix = setMatrixCell model.dataMatrix rowIdx colIdx (forceInt input)
-      }
+    ObjectiveInput input ->
+      let
+        oldData = model.data
+        newData = { oldData | objective = input }
+      in
+        { model
+        | data = newData
+        }
+
+    MatrixInput rowIdx colIdx input ->
+      let
+        oldData = model.data
+        newData = { oldData | matrix = setMatrixCell model.data.matrix rowIdx colIdx (forceInt input) }
+      in
+        { model
+        | data = newData
+        }
+
+    ConstraintInput rowIdx input ->
+      let
+        oldData = model.data
+        newData = { oldData | constraint = set rowIdx (forceInt input) model.data.constraint }
+      in
+        { model
+        | data = newData
+        }
 
     Finish ->
-      { model | outputText = Debug.toString (Debug.log "Finish" model.dataMatrix) }
+      { model | outputText = Debug.toString (Debug.log "Finish" model.data) }
 
 
 -- Update Helpers
@@ -134,7 +196,7 @@ view model =
       [ dt [] [ text "Objective Function" ]
       , dd [] 
         [ span [] [ text "Maximize:" ]
-        , input [] [] 
+        , input [ value model.data.objective, onInput ObjectiveInput ] [] 
         ]
       , dt [] [ text "Constraint Matrix" ]
       , dd [] 
@@ -154,19 +216,27 @@ view model =
 -- View Helpers
 inputMatrix : Model -> Html Msg
 inputMatrix model =
-  div [] (toList (indexedMap inputRow model.dataMatrix))
+  div [] (toList (indexedMap (inputRow model.data.constraint) model.data.matrix))
 
-inputRow : Int -> Array String -> Html Msg
-inputRow rowIdx rowArray =
+inputRow : Array String -> Int -> Array String -> Html Msg
+inputRow constraintArray rowIdx rowArray =
   div [ style "display" "flex"] 
     [ div [] (toList (indexedMap (viewInput rowIdx) rowArray))
     , div []
       [ span [] [ text "=" ]
-      , input [] [] 
+      , input [ value (getString rowIdx constraintArray), onInput (ConstraintInput rowIdx) ] [] 
       ]
     ]
 
 viewInput : Int -> Int -> String -> Html Msg
 viewInput rowIdx colIdx str =
-  input [ value str, onInput (CellInput rowIdx colIdx) ] []
+  input [ value str, onInput (MatrixInput rowIdx colIdx) ] []
+
+getString : Int -> Array String -> String
+getString rowIdx arr =
+  case get rowIdx arr of
+    Just str ->
+      str
+    Nothing ->
+      ""
 
