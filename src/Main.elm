@@ -1,15 +1,11 @@
 module Main exposing (..)
 
 import Browser
-import Html exposing (Html, div, button, input, span, text)
-import Html.Attributes exposing (value)
+import Html exposing (..)
+import Html.Attributes exposing (style, value)
 import Html.Events exposing (onClick, onInput)
-
-import Array exposing (Array, initialize, get, set, push, slice, toList, map, indexedMap)
-import Array exposing (toIndexedList)
-import String exposing (toInt, fromInt)
-import Html exposing (strong)
-import String exposing (dropRight)
+import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap)
+import String exposing (toInt, fromInt, dropRight)
 
 
 
@@ -29,7 +25,7 @@ type alias Model =
   { numRows: Int
   , numCols: Int
   , dataMatrix: Array (Array String)
-  , randText: String
+  , outputText: String
   }
 
 
@@ -73,14 +69,14 @@ update msg model =
     IncrementCol ->
       { model
       | numCols = model.numCols + 1
-      , dataMatrix = map  (push "") model.dataMatrix
+      , dataMatrix = Array.map (push "") model.dataMatrix
       }
 
     DecrementCol ->
       if model.numCols /= 1 then
         { model
         | numCols = model.numCols - 1
-        , dataMatrix = map pop model.dataMatrix
+        , dataMatrix = Array.map pop model.dataMatrix
         }
       else
         model
@@ -94,8 +90,10 @@ update msg model =
       }
 
     Finish ->
-      { model | randText = Debug.toString (Debug.log "Finish" model.dataMatrix) }
+      { model | outputText = Debug.toString (Debug.log "Finish" model.dataMatrix) }
 
+
+-- Update Helpers
 setMatrixCell : Array (Array String) -> Int -> Int -> String -> Array (Array String)
 setMatrixCell matrix rowIdx colIdx val =
   set rowIdx (set colIdx val (getMatrixRow matrix rowIdx)) matrix
@@ -131,23 +129,42 @@ forceInt str =
 view : Model -> Html Msg
 view model =
   div []
-    [ button [ onClick DecrementRow ] [ text "- Row" ]
-    , button [ onClick IncrementRow ] [ text "+ Row" ]
-    , button [ onClick DecrementCol ] [ text "- Col" ]
-    , button [ onClick IncrementCol ] [ text "+ Col" ]
-    , button [ onClick Reset ] [ text "Reset" ]
-    , inputMatrix model
-    , button [ onClick Finish ] [ text "Finish" ]
-    , span [] [ text model.randText ]
+    [ h1 [] [ text "Simplex Solver" ]
+    , dl []
+      [ dt [] [ text "Objective Function" ]
+      , dd [] 
+        [ span [] [ text "Maximize:" ]
+        , input [] [] 
+        ]
+      , dt [] [ text "Constraint Matrix" ]
+      , dd [] 
+        [ button [ onClick DecrementRow ] [ text "- Row" ]
+        , button [ onClick IncrementRow ] [ text "+ Row" ]
+        , button [ onClick DecrementCol ] [ text "- Col" ]
+        , button [ onClick IncrementCol ] [ text "+ Col" ]
+        , button [ onClick Reset ] [ text "Reset" ]
+        , inputMatrix model
+        , button [ onClick Finish ] [ text "Finish" ]
+        , span [] [ text model.outputText ]
+        ]
+      ]
     ]
 
+
+-- View Helpers
 inputMatrix : Model -> Html Msg
 inputMatrix model =
   div [] (toList (indexedMap inputRow model.dataMatrix))
 
 inputRow : Int -> Array String -> Html Msg
 inputRow rowIdx rowArray =
-  div [] (toList (indexedMap (viewInput rowIdx) rowArray))
+  div [ style "display" "flex"] 
+    [ div [] (toList (indexedMap (viewInput rowIdx) rowArray))
+    , div []
+      [ span [] [ text "=" ]
+      , input [] [] 
+      ]
+    ]
 
 viewInput : Int -> Int -> String -> Html Msg
 viewInput rowIdx colIdx str =
