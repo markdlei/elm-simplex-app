@@ -5,10 +5,10 @@ import Html exposing (..)
 import Html.Attributes exposing (style, value)
 import Html.Events exposing (onClick, onInput)
 import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap, fromList)
-import String exposing (toInt, fromInt, dropRight)
+import String exposing (toInt, dropRight)
 import Maybe exposing (withDefault)
-import List exposing (concat)
-import List exposing (take)
+import List exposing (concat, take)
+import String exposing (fromInt)
 
 
 
@@ -164,6 +164,9 @@ update msg model =
 
     Finish ->
       { model | outputData = inputToNumData model.inputData, outputText = Debug.toString (Debug.log "Finish" model.outputData) }
+      -- { model
+      -- | outputText = formatOutput sef inputToNumData model.inputData
+      -- }
 
 
 -- Update Helpers
@@ -242,29 +245,33 @@ view model =
 -- View Helpers
 objectiveVector : Model -> Html Msg
 objectiveVector model =
-  div [] (take (model.numCols * 2 - 1) (concat (toList (indexedMap objectiveInput model.inputData.objective))))
+  div [] (take (model.numCols * 3 - 1) (concat (toList (indexedMap objectiveInput model.inputData.objective))))
 
 constraintMatrix : Model -> Html Msg
 constraintMatrix model =
-  div [] (toList (indexedMap (inputRow model.inputData.constraint) model.inputData.matrix))
+  div [] (toList (indexedMap (inputRow model.numCols model.inputData.constraint) model.inputData.matrix))
 
-inputRow : Array String -> Int -> Array String -> Html Msg
-inputRow constraintArray rowIdx rowArray =
+inputRow : Int -> Array String -> Int -> Array String -> Html Msg
+inputRow numCols constraintArray rowIdx rowArray =
   div [ style "display" "flex"] 
-    [ div [] (toList (indexedMap (matrixInput rowIdx) rowArray))
+    [ div [] (take (numCols * 3 - 1) (concat (toList (indexedMap (matrixInput rowIdx) rowArray))))
     , div []
       [ span [] [ text "=" ]
       , input [ value (getString rowIdx constraintArray), onInput (ConstraintInput rowIdx) ] [] 
       ]
     ]
 
-matrixInput : Int -> Int -> String -> Html Msg
+matrixInput : Int -> Int -> String -> List (Html Msg)
 matrixInput rowIdx colIdx str =
-  input [ value str, onInput (MatrixInput rowIdx colIdx) ] []
+  [ input [ value str, onInput (MatrixInput rowIdx colIdx) ] []
+  , span [] [ text ("x" ++ (fromInt colIdx)) ]
+  , span [] [ text "+" ]
+  ]
 
 objectiveInput : Int -> String -> List (Html Msg)
 objectiveInput colIdx str =
   [ input [ value str, onInput (ObjectiveInput colIdx) ] []
+  , span [] [ text ("x" ++ (fromInt colIdx)) ]
   , span [] [ text "+" ]
   ]
 
