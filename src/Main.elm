@@ -2,13 +2,14 @@ module Main exposing (..)
 
 import Browser
 import Html exposing (..)
-import Html.Attributes exposing (style, value)
+import Html.Attributes exposing (style, value, selected)
 import Html.Events exposing (onClick, onInput)
 import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap, fromList)
-import String exposing (toInt, dropRight)
+import String exposing (toInt, fromInt, dropRight)
 import Maybe exposing (withDefault)
 import List exposing (concat, take)
-import String exposing (fromInt)
+import Array exposing (repeat)
+import Array exposing (length)
 
 
 
@@ -33,15 +34,19 @@ type alias Model =
   }
 
 type alias InputData =
-  { objective: Array String
+  { isMaximizationProb: Bool
+  , objective: Array String
   , matrix: Array (Array String)
   , constraint: Array String
+  , domains: Array String
   }
 
 type alias Data =
-  { objective: Array Int
+  { isMaximizationProb: Bool
+  , objective: Array Int
   , matrix: Array (Array Int)
   , constraint: Array Int
+  , domains: Array String
   }
 
 
@@ -51,12 +56,20 @@ init =
     3
     3
     (InputData 
+      True
       (initialize 3 (always ""))
       (initialize 3 (always (initialize 3 (always ""))))
       (initialize 3 (always ""))
+      (initialize 3 (always "&ge; 0"))
     )
     ""
-    (Data (fromList []) (fromList []) (fromList []))
+    (Data
+      True
+      (fromList [])
+      (fromList [])
+      (fromList [])
+      (fromList [])
+    )
 
 
 
@@ -72,6 +85,7 @@ type Msg
   | ObjectiveInput Int String
   | MatrixInput Int Int String
   | ConstraintInput Int String
+  | ChangeXDomain Int String
   | Finish
 
 
@@ -162,10 +176,19 @@ update msg model =
         | inputData = newData
         }
 
+    ChangeXDomain idx str ->
+      let
+        oldData = model.inputData
+        newData = { oldData | domains = set idx str model.inputData.domains }
+      in
+        { model
+        | inputData = newData
+        }
+
     Finish ->
-      { model | outputData = inputToNumData model.inputData, outputText = Debug.toString (Debug.log "Finish" model.outputData) }
+      { model | outputData = inputToNumData model.inputData, outputText = Debug.toString (toSEF model.outputData) }
       -- { model
-      -- | outputText = formatOutput sef inputToNumData model.inputData
+      -- | outputText = formatOutput solve findCanon toSEF inputToNumData model.inputData
       -- }
 
 
@@ -199,9 +222,11 @@ forceIntInput str =
 
 inputToNumData : InputData -> Data
 inputToNumData input =
-  { objective = Array.map anyStringToInt input.objective
+  { isMaximizationProb = input.isMaximizationProb
+  , objective = Array.map anyStringToInt input.objective
   , matrix = Array.map (Array.map anyStringToInt) input.matrix
   , constraint = Array.map anyStringToInt input.constraint
+  , domains = input.domains
   }
 
 parseObjective : String -> Maybe Int
@@ -211,6 +236,22 @@ parseObjective objective =
 anyStringToInt : String -> Int
 anyStringToInt str =
   withDefault 0 (toInt str)
+
+toSEF : Data -> Data
+toSEF data =
+  { data
+  | isMaximizationProb = True
+  , objective = makeMaximization data.isMaximizationProb data.objective
+  -- , matrix = makeConstraintsSEF data
+  , domains = repeat (length data.domains) "&ge; 0"
+  }
+
+makeMaximization : Bool -> Array Int -> Array Int
+makeMaximization isMaximizationProb objective =
+  if isMaximizationProb then
+    objective
+  else
+    Array.map ((*) -1) objective
 
 
 
@@ -235,6 +276,7 @@ view model =
         , button [ onClick IncrementCol ] [ text "+ Col" ]
         , button [ onClick Reset ] [ text "Reset" ]
         , constraintMatrix model
+        , selectXDomains model
         , button [ onClick Finish ] [ text "Finish" ]
         , span [] [ text model.outputText ]
         ]
@@ -253,7 +295,7 @@ constraintMatrix model =
 
 inputRow : Int -> Array String -> Int -> Array String -> Html Msg
 inputRow numCols constraintArray rowIdx rowArray =
-  div [ style "display" "flex"] 
+  div [ style "display" "flex" ] 
     [ div [] (take (numCols * 3 - 1) (concat (toList (indexedMap (matrixInput rowIdx) rowArray))))
     , div []
       [ span [] [ text "=" ]
@@ -278,4 +320,19 @@ objectiveInput colIdx str =
 getString : Int -> Array String -> String
 getString rowIdx arr =
   withDefault "" (get rowIdx arr)
+
+selectXDomains : Model -> Html Msg
+selectXDomains model =
+  div [ style "display" "flex" ] (toList (initialize model.numCols xDomainOptions))
+
+xDomainOptions : Int -> Html Msg
+xDomainOptions idx =
+  div []
+  [ span [] [ text ("x" ++ (fromInt idx)) ]
+  , select [ onInput (ChangeXDomain idx) ]
+      [ option [ value ">= 0", selected True ] [ text ">= 0"]
+      , option [ value "<= 0" ] [ text "<= 0"]
+      , option [ value "free" ] [ text "free"]
+      ]
+  ]
 
