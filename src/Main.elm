@@ -5,9 +5,9 @@ import Html exposing (..)
 import Html.Attributes exposing (style, value, selected)
 import Html.Events exposing (onClick, onInput)
 import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap, repeat, length, filter, foldl, append)
-import String exposing (toInt, fromInt, dropRight, contains)
+import String exposing (fromInt, dropRight, contains, split, join)
 import Maybe exposing (withDefault)
-import List exposing (concat, take)
+import List exposing (concat, take, head, tail, reverse)
 import Tuple exposing (pair, first, second, mapSecond)
 
 
@@ -43,9 +43,9 @@ type alias InputData =
 
 type alias Data =
   { isMaximizationProb: Bool
-  , objective: Array Int
-  , matrix: Array (Array Int)
-  , constraint: Array Int
+  , objective: Array Float
+  , matrix: Array (Array Float)
+  , constraint: Array Float
   , constraintType: Array String
   , domains: Array String
   }
@@ -149,7 +149,7 @@ update msg model =
     ObjectiveInput colIdx input ->
       let
         oldData = model.inputData
-        newData = { oldData | objective = set colIdx (forceIntInput input) model.inputData.objective }
+        newData = { oldData | objective = set colIdx (forceFloatInput input) model.inputData.objective }
       in
         { model
         | inputData = newData
@@ -158,7 +158,7 @@ update msg model =
     MatrixInput rowIdx colIdx input ->
       let
         oldData = model.inputData
-        newData = { oldData | matrix = setMatrixCell model.inputData.matrix rowIdx colIdx (forceIntInput input) }
+        newData = { oldData | matrix = setMatrixCell model.inputData.matrix rowIdx colIdx (forceFloatInput input) }
       in
         { model
         | inputData = newData
@@ -167,7 +167,7 @@ update msg model =
     ConstraintInput rowIdx input ->
       let
         oldData = model.inputData
-        newData = { oldData | constraint = set rowIdx (forceIntInput input) model.inputData.constraint }
+        newData = { oldData | constraint = set rowIdx (forceFloatInput input) model.inputData.constraint }
       in
         { model
         | inputData = newData
@@ -208,14 +208,29 @@ update msg model =
 -- Update Helpers
 setMatrixCell : Array (Array String) -> Int -> Int -> String -> Array (Array String)
 setMatrixCell matrix rowIdx colIdx val =
-  set rowIdx (set colIdx val (getMatrixRow matrix rowIdx)) matrix
+  set rowIdx (set colIdx val (getMatrixRow rowIdx matrix)) matrix
 
-forceIntInput : String -> String
-forceIntInput str =
-  if str == "-" then
+stringIsFloat : String -> Bool
+stringIsFloat str =
+  case String.toFloat str of
+    Just _ ->
+      True
+    Nothing ->
+      False
+
+forceFloatInput : String -> String
+forceFloatInput str =
+  if str == "-" || str == "."  then
     str
+  else if String.contains "/" str then
+    if String.startsWith "/" str then
+      "1" ++ str
+    else if String.endsWith "/" str || List.all stringIsFloat (split "/" str) then
+      str
+    else
+      dropRight 1 str
   else
-    case (toInt str) of
+    case (String.toFloat str) of
       Just _ ->
         str
       Nothing ->
@@ -224,9 +239,9 @@ forceIntInput str =
 inputToNumData : InputData -> Data
 inputToNumData input =
   {  isMaximizationProb = input.isMaximizationProb
-  , objective = Array.map anyStringToInt input.objective
-  , matrix = Array.map (Array.map anyStringToInt) input.matrix
-  , constraint = Array.map anyStringToInt input.constraint
+  , objective = Array.map anyStringToFloat input.objective
+  , matrix = Array.map (Array.map anyStringToFloat) input.matrix
+  , constraint = Array.map anyStringToFloat input.constraint
   , constraintType = input.constraintType
   , domains = input.domains
   }
@@ -242,13 +257,14 @@ makeMaximization data =
   else
     { data
     | isMaximizationProb = True
-    , objective = Array.map ((*) -1) data.objective
+    , objective = Array.map negate data.objective
     }
 
 makeDomainsPositive : Data -> Data
 makeDomainsPositive data =
   let
-    domainToNum : String -> Int
+    -- Functions
+    domainToNum : String -> Float
     domainToNum domain = 
       if domain == "<= 0" then
         -1
@@ -260,16 +276,14 @@ makeDomainsPositive data =
         idx
       else
         -1
-    addAntiFreeCols : Array Int -> Array Int -> Array Int
-    addAntiFreeCols frees shortArray =
-      foldl duplicateAndNegate shortArray frees
-    duplicateAndNegate : Int -> Array Int -> Array Int
-    duplicateAndNegate idx shortArray =
-      push ((getInt idx shortArray) * -1) shortArray
-      
+    duplicateAndNegate : Int -> Array Float -> Array Float
+    duplicateAndNegate idx shortArray = push (negate (getFloat idx shortArray)) shortArray
+    addAntiFreeCols : Array Int -> Array Float -> Array Float
+    addAntiFreeCols frees shortArray = foldl duplicateAndNegate shortArray frees
+    -- Values
     freeArray = filter ((/=) -1) (indexedMap addIdxIfFree data.domains)
     multArray = Array.map domainToNum data.domains
-    mapMult idx val = (getInt idx multArray) * val
+    mapMult idx val = (getFloat idx multArray) * val
   in
     { data
     | objective = addAntiFreeCols freeArray (indexedMap mapMult data.objective)
@@ -289,14 +303,14 @@ makeConstraintsEq data =
     constraintTypeLoc = (filter secondIsNotEq (indexedMap pair data.constraintType))
     newMatrixColEntry = Array.map (mapSecond typeToVal) constraintTypeLoc
   in
-  { data
-  | objective = append data.objective (repeat (length constraintTypeLoc) 0)
-  , matrix = indexedMap (addToMatrix newMatrixColEntry) data.matrix
-  , constraintType = repeat (length data.constraint) "="
-  , domains = append data.domains (repeat (length constraintTypeLoc) ">= 0")
-  }
+    { data
+    | objective = append data.objective (repeat (length constraintTypeLoc) 0)
+    , matrix = indexedMap (addToMatrix newMatrixColEntry) data.matrix
+    , constraintType = repeat (length data.constraint) "="
+    , domains = append data.domains (repeat (length constraintTypeLoc) ">= 0")
+    }
 
-addToMatrix : Array (Int, Int) -> Int -> Array Int -> Array Int
+addToMatrix : Array (Int, Float) -> Int -> Array Float -> Array Float
 addToMatrix newMatrixColEntry rowIdx matrixRow =
   let
     idxMatch tup =
@@ -367,14 +381,14 @@ inputRow numCols constraintArray rowIdx rowArray =
 matrixInput : Int -> Int -> String -> List (Html Msg)
 matrixInput rowIdx colIdx str =
   [ input [ value str, onInput (MatrixInput rowIdx colIdx) ] []
-  , span [] [ text ("x" ++ (fromInt colIdx)) ]
+  , span [] [ text ("x" ++ (fromInt (colIdx + 1))) ]
   , span [] [ text "+" ]
   ]
 
 objectiveInput : Int -> String -> List (Html Msg)
 objectiveInput colIdx str =
   [ input [ value str, onInput (ObjectiveInput colIdx) ] []
-  , span [] [ text ("x" ++ (fromInt colIdx)) ]
+  , span [] [ text ("x" ++ (fromInt (colIdx + 1))) ]
   , span [] [ text "+" ]
   ]
 
@@ -385,7 +399,7 @@ selectXDomains model =
 xDomainOptions : Int -> Html Msg
 xDomainOptions idx =
   div []
-  [ span [] [ text ("x" ++ (fromInt idx)) ]
+  [ span [] [ text ("x" ++ (fromInt (idx + 1))) ]
   , select [ onInput (ChangeXDomain idx) ]
       [ option [ value ">= 0", selected True ] [ text ">= 0"]
       , option [ value "<= 0" ] [ text "<= 0"]
@@ -398,8 +412,8 @@ xDomainOptions idx =
 -- Helpers 
 
 
-getMatrixRow : Array (Array String) -> Int -> Array String
-getMatrixRow matrix rowIdx = 
+getMatrixRow : Int -> Array (Array String) -> Array String
+getMatrixRow rowIdx matrix = 
   case get rowIdx matrix of
     Just arr ->
       arr
@@ -414,9 +428,24 @@ getInt : Int -> Array Int -> Int
 getInt rowIdx arr =
   withDefault 0 (get rowIdx arr)
 
-anyStringToInt : String -> Int
-anyStringToInt str =
-  withDefault 0 (toInt str)
+getFloat : Int -> Array Float -> Float
+getFloat rowIdx arr =
+  withDefault 0 (get rowIdx arr)
+
+anyStringToFloat : String -> Float
+anyStringToFloat str =
+  if String.contains "/" str then
+    if String.endsWith "/" str then
+      anyStringToFloat (String.dropRight 1 str)
+    else
+      let
+        floatList = split "/" str
+        startStr = join "/" (reverse (withDefault ["1"] (tail (reverse floatList))))
+        endFloat = anyStringToFloat (withDefault "1" (head (reverse floatList)))
+      in
+        anyStringToFloat startStr / endFloat
+  else
+    withDefault 0 (String.toFloat str)
 
 pop : Array a -> Array a
 pop arr =
