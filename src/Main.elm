@@ -4,12 +4,11 @@ import Browser
 import Html exposing (..)
 import Html.Attributes exposing (style, value, selected)
 import Html.Events exposing (onClick, onInput)
-import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap, fromList)
-import String exposing (toInt, fromInt, dropRight)
+import Array exposing (Array, initialize, get, set, push, slice, toList, indexedMap, repeat, length, filter, foldl, append)
+import String exposing (toInt, fromInt, dropRight, contains)
 import Maybe exposing (withDefault)
 import List exposing (concat, take)
-import Array exposing (repeat)
-import Array exposing (length)
+import Tuple exposing (pair, first, second, mapSecond)
 
 
 
@@ -30,7 +29,7 @@ type alias Model =
   , numCols: Int
   , inputData: InputData
   , outputText: String
-  , outputData: Data
+  -- , outputData: Data
   }
 
 type alias InputData =
@@ -38,6 +37,7 @@ type alias InputData =
   , objective: Array String
   , matrix: Array (Array String)
   , constraint: Array String
+  , constraintType: Array String
   , domains: Array String
   }
 
@@ -46,6 +46,7 @@ type alias Data =
   , objective: Array Int
   , matrix: Array (Array Int)
   , constraint: Array Int
+  , constraintType: Array String
   , domains: Array String
   }
 
@@ -57,19 +58,13 @@ init =
     3
     (InputData 
       True
-      (initialize 3 (always ""))
-      (initialize 3 (always (initialize 3 (always ""))))
-      (initialize 3 (always ""))
-      (initialize 3 (always "&ge; 0"))
+      (repeat 3 "")
+      (repeat 3 (repeat 3 ""))
+      (repeat 3 "")
+      (repeat 3 "=")
+      (repeat 3 ">= 0")
     )
     ""
-    (Data
-      True
-      (fromList [])
-      (fromList [])
-      (fromList [])
-      (fromList [])
-    )
 
 
 
@@ -85,6 +80,8 @@ type Msg
   | ObjectiveInput Int String
   | MatrixInput Int Int String
   | ConstraintInput Int String
+  | ChangeProblemType String
+  | ChangeConstraintType Int String
   | ChangeXDomain Int String
   | Finish
 
@@ -97,7 +94,7 @@ update msg model =
         oldData = model.inputData
         newData =
           { oldData
-          | matrix = push (initialize model.numCols (always "")) model.inputData.matrix
+          | matrix = push (repeat model.numCols "") model.inputData.matrix
           , constraint = push "" model.inputData.constraint
           }
       in
@@ -176,6 +173,24 @@ update msg model =
         | inputData = newData
         }
 
+    ChangeProblemType maxOrMin ->
+      let
+        oldData = model.inputData
+        newData = { oldData | isMaximizationProb = contains "max" maxOrMin }
+      in
+        { model
+        | inputData = newData
+        }
+
+    ChangeConstraintType idx constraint ->
+      let
+        oldData = model.inputData
+        newData = { oldData | constraintType = set idx constraint model.inputData.constraintType }
+      in
+        { model
+        | inputData = newData
+        }
+
     ChangeXDomain idx str ->
       let
         oldData = model.inputData
@@ -186,28 +201,14 @@ update msg model =
         }
 
     Finish ->
-      { model | outputData = inputToNumData model.inputData, outputText = Debug.toString (toSEF model.outputData) }
-      -- { model
-      -- | outputText = formatOutput solve findCanon toSEF inputToNumData model.inputData
-      -- }
+      { model | outputText = Debug.toString (toSEF (inputToNumData model.inputData)) }
+      -- { model | outputText = formatOutput solve findCanon toSEF inputToNumData model.inputData }
 
 
 -- Update Helpers
 setMatrixCell : Array (Array String) -> Int -> Int -> String -> Array (Array String)
 setMatrixCell matrix rowIdx colIdx val =
   set rowIdx (set colIdx val (getMatrixRow matrix rowIdx)) matrix
-
-getMatrixRow : Array (Array String) -> Int -> Array String
-getMatrixRow matrix rowIdx = 
-  case get rowIdx matrix of
-    Just arr ->
-      arr
-    Nothing ->
-      Debug.todo "Handle offset getter"
-
-pop : Array a -> Array a
-pop arr =
-  slice 0 -1 arr
 
 forceIntInput : String -> String
 forceIntInput str =
@@ -222,36 +223,89 @@ forceIntInput str =
 
 inputToNumData : InputData -> Data
 inputToNumData input =
-  { isMaximizationProb = input.isMaximizationProb
+  {  isMaximizationProb = input.isMaximizationProb
   , objective = Array.map anyStringToInt input.objective
   , matrix = Array.map (Array.map anyStringToInt) input.matrix
   , constraint = Array.map anyStringToInt input.constraint
+  , constraintType = input.constraintType
   , domains = input.domains
   }
 
-parseObjective : String -> Maybe Int
-parseObjective objective =
-  toInt objective
-
-anyStringToInt : String -> Int
-anyStringToInt str =
-  withDefault 0 (toInt str)
-
 toSEF : Data -> Data
 toSEF data =
+  makeConstraintsEq (makeDomainsPositive (makeMaximization data))
+
+makeMaximization : Data -> Data
+makeMaximization data =
+  if data.isMaximizationProb then
+    data
+  else
+    { data
+    | isMaximizationProb = True
+    , objective = Array.map ((*) -1) data.objective
+    }
+
+makeDomainsPositive : Data -> Data
+makeDomainsPositive data =
+  let
+    domainToNum : String -> Int
+    domainToNum domain = 
+      if domain == "<= 0" then
+        -1
+      else
+        1
+    addIdxIfFree : Int -> String -> Int
+    addIdxIfFree idx domain =
+      if domain == "free" then
+        idx
+      else
+        -1
+    addAntiFreeCols : Array Int -> Array Int -> Array Int
+    addAntiFreeCols frees shortArray =
+      foldl duplicateAndNegate shortArray frees
+    duplicateAndNegate : Int -> Array Int -> Array Int
+    duplicateAndNegate idx shortArray =
+      push ((getInt idx shortArray) * -1) shortArray
+      
+    freeArray = filter ((/=) -1) (indexedMap addIdxIfFree data.domains)
+    multArray = Array.map domainToNum data.domains
+    mapMult idx val = (getInt idx multArray) * val
+  in
+    { data
+    | objective = addAntiFreeCols freeArray (indexedMap mapMult data.objective)
+    , matrix = Array.map (addAntiFreeCols freeArray) (Array.map (indexedMap mapMult) data.matrix)
+    , domains = repeat ((length data.domains) + (length freeArray)) ">= 0"
+    }
+
+makeConstraintsEq : Data -> Data
+makeConstraintsEq data =
+  let
+    secondIsNotEq tup = (second tup) /= "="
+    typeToVal conType = 
+      if conType == ">=" then
+        -1
+      else
+        1
+    constraintTypeLoc = (filter secondIsNotEq (indexedMap pair data.constraintType))
+    newMatrixColEntry = Array.map (mapSecond typeToVal) constraintTypeLoc
+  in
   { data
-  | isMaximizationProb = True
-  , objective = makeMaximization data.isMaximizationProb data.objective
-  -- , matrix = makeConstraintsSEF data
-  , domains = repeat (length data.domains) "&ge; 0"
+  | objective = append data.objective (repeat (length constraintTypeLoc) 0)
+  , matrix = indexedMap (addToMatrix newMatrixColEntry) data.matrix
+  , constraintType = repeat (length data.constraint) "="
+  , domains = append data.domains (repeat (length constraintTypeLoc) ">= 0")
   }
 
-makeMaximization : Bool -> Array Int -> Array Int
-makeMaximization isMaximizationProb objective =
-  if isMaximizationProb then
-    objective
-  else
-    Array.map ((*) -1) objective
+addToMatrix : Array (Int, Int) -> Int -> Array Int -> Array Int
+addToMatrix newMatrixColEntry rowIdx matrixRow =
+  let
+    idxMatch tup =
+      if (first tup) == rowIdx then
+        second tup
+      else
+        0
+  in
+    append matrixRow (Array.map idxMatch newMatrixColEntry)
 
 
 
@@ -265,7 +319,10 @@ view model =
     , dl []
       [ dt [] [ text "Objective Function" ]
       , dd [] 
-        [ span [] [ text "Maximize:" ]
+        [ select [ onInput ChangeProblemType ]
+          [ option [ value "max", selected True ] [ text "Maximize" ]
+          , option [ value "min" ] [ text "Minimize" ]
+          ]
         , objectiveVector model
         ]
       , dt [] [ text "Constraint Matrix" ]
@@ -298,7 +355,11 @@ inputRow numCols constraintArray rowIdx rowArray =
   div [ style "display" "flex" ] 
     [ div [] (take (numCols * 3 - 1) (concat (toList (indexedMap (matrixInput rowIdx) rowArray))))
     , div []
-      [ span [] [ text "=" ]
+      [ select [ onInput (ChangeConstraintType rowIdx) ]
+        [ option [ value "=", selected True ] [ text "=" ]
+        , option [ value ">=" ] [ text ">=" ]
+        , option [ value "<=" ] [ text "<=" ]
+        ]
       , input [ value (getString rowIdx constraintArray), onInput (ConstraintInput rowIdx) ] [] 
       ]
     ]
@@ -317,10 +378,6 @@ objectiveInput colIdx str =
   , span [] [ text "+" ]
   ]
 
-getString : Int -> Array String -> String
-getString rowIdx arr =
-  withDefault "" (get rowIdx arr)
-
 selectXDomains : Model -> Html Msg
 selectXDomains model =
   div [ style "display" "flex" ] (toList (initialize model.numCols xDomainOptions))
@@ -335,4 +392,33 @@ xDomainOptions idx =
       , option [ value "free" ] [ text "free"]
       ]
   ]
+
+
+
+-- Helpers 
+
+
+getMatrixRow : Array (Array String) -> Int -> Array String
+getMatrixRow matrix rowIdx = 
+  case get rowIdx matrix of
+    Just arr ->
+      arr
+    Nothing ->
+      Debug.todo "Handle offset getter"
+
+getString : Int -> Array String -> String
+getString rowIdx arr =
+  withDefault "" (get rowIdx arr)
+
+getInt : Int -> Array Int -> Int
+getInt rowIdx arr =
+  withDefault 0 (get rowIdx arr)
+
+anyStringToInt : String -> Int
+anyStringToInt str =
+  withDefault 0 (toInt str)
+
+pop : Array a -> Array a
+pop arr =
+  slice 0 -1 arr
 
